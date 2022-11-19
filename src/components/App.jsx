@@ -1,4 +1,4 @@
-import { Component } from 'react';
+import { useState, useEffect, useReducer } from 'react';
 import { Searchbar } from './Searchbar/Searchbar';
 import { fetchImages } from './services/api';
 import { ImageGallery } from './ImageGallery/ImageGallery';
@@ -6,74 +6,93 @@ import { LoadMore } from './LoadMore/LoadMore';
 import { Loader } from './Loader/Loader';
 import { Modal } from './Modal/Modal';
 
-export class App extends Component {
-  state = {
-    images: [],
-    query: '',
-    page: 1,
-    isLoading: false,
-    modalImage: '',
-    showModal: false,
-    totalHits: 0,
-  };
+const totalHitsReducer = (state, { type, payload }) => {
+  switch (type) {
+    case 'queryChange':
+      return { ...state, images: payload.images, totalHits: payload.totalHits };
 
-  componentDidUpdate = (_, prevState) => {
-    if (
-      this.state.query !== prevState.query ||
-      this.state.page !== prevState.page
-    ) {
-      this.setState({ isLoading: true });
-      fetchImages(this.state.query, this.state.page)
-        .then(data => {
-          this.setState(prevState => ({
-            images:
-              this.state.page === 1
-                ? [...data.hits]
-                : [...prevState.images, ...data.hits],
+    case 'submit':
+      return payload.page === 1
+        ? {
+            ...state,
+            images: payload.images,
+            totalHits: payload.totalHits - payload.images.length,
+          }
+        : {
+            ...state,
+            images: [...state.images, ...payload.images],
             totalHits:
-              this.state.page === 1
-                ? data.totalHits - data.hits.length
-                : data.totalHits - [...prevState.images, ...data.hits].length,
-          }));
-        })
-        .finally(() => {
-          this.setState({ isLoading: false });
-        });
-    }
-  };
+              payload.totalHits - [...state.images, ...payload.images].length,
+          };
 
-  handleSubmit = query => {
-    this.setState({ query, page: 1 });
-  };
+    default:
+      throw new Error(`Unsuported action type ${type}`);
+  }
+};
 
-  handleLoadMore = () => {
-    this.setState(state => ({ page: state.page + 1 }));
-  };
+export const App = () => {
+  const [state, dispatch] = useReducer(totalHitsReducer, {
+    images: [],
+    totalHits: 0,
+  });
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(false);
+  const [modalImage, setModalImage] = useState('');
+  const [showModal, setShowModal] = useState(false);
 
-  toggleModal = modalImage => {
-    if (!modalImage) {
-      this.setState({ modalImage: '', showModal: false });
+  useEffect(() => {
+    dispatch({ type: 'queryChange', payload: { images: [], totalHits: 0 } });
+  }, [query]);
+
+  useEffect(() => {
+    if (query === '') {
       return;
     }
-    this.setState({ modalImage, showModal: true });
+    setIsLoading(true);
+    fetchImages(query, page)
+      .then(data => {
+        dispatch({
+          type: 'submit',
+          payload: { page: page, images: data.hits, totalHits: data.totalHits },
+        });
+      })
+      .catch(error => {
+        console.error(error);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }, [page, query]);
+
+  const handleSubmit = query => {
+    setQuery(query);
+    setPage(1);
   };
 
-  render() {
-    return (
-      <div className="App">
-        <Searchbar onSubmit={this.handleSubmit} />
-        {this.state.isLoading && <Loader />}
-        <ImageGallery images={this.state.images} openModal={this.toggleModal} />
-        {!!this.state.totalHits && (
-          <LoadMore onLoadMore={this.handleLoadMore} />
-        )}
-        {this.state.showModal && (
-          <Modal
-            modalImage={this.state.modalImage}
-            closeModal={this.toggleModal}
-          />
-        )}
-      </div>
-    );
-  }
-}
+  const handleLoadMore = () => {
+    setPage(state => state + 1);
+  };
+
+  const toggleModal = modalImage => {
+    if (!modalImage) {
+      setModalImage('');
+      setShowModal(false);
+      document.body.style.overflow = '';
+      return;
+    }
+    setModalImage(modalImage);
+    setShowModal(true);
+    document.body.style.overflow = 'hidden';
+  };
+
+  return (
+    <div className="App">
+      <Searchbar onSubmit={handleSubmit} />
+      {isLoading && <Loader />}
+      <ImageGallery images={state.images} openModal={toggleModal} />
+      {!!state.totalHits && <LoadMore onLoadMore={handleLoadMore} />}
+      {showModal && <Modal modalImage={modalImage} closeModal={toggleModal} />}
+    </div>
+  );
+};
